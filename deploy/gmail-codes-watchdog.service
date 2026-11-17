@@ -1,0 +1,8 @@
+[Unit]
+Description=gmail-codes watchdog (heartbeat check)
+ConditionPathExists=/etc/gmail-codes.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/gmail-codes.env
+ExecStart=/usr/local/bin/gmail-codes watchdog

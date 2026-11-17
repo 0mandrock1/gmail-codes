@@ -1,0 +1,19 @@
+[Unit]
+Description=gmail-codes: Gmail IMAP IDLE -> Telegram verification codes
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/gmail-codes.env
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/gmail-codes.env
+ExecStart=/usr/local/bin/gmail-codes run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/data/projects/gmail-codes
+
+[Install]
+WantedBy=multi-user.target
