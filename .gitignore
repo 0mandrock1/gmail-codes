@@ -1,0 +1,5 @@
+venv/
+state.db*
+heartbeat
+.env
+__pycache__/
