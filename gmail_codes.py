@@ -45,7 +45,7 @@ _KW = re.compile(
     re.I,
 )
 _KW_BAD_PREFIX = re.compile(
-    r"(?:promo|promotional|discount|coupon|gift|zip|postal|post|area|country|tracking|referral|invite)\s*$",
+    r"(?:promo|promotional|discount|coupon|gift|zip|postal|post|area|country|tracking|referral|invite|registration|company|tax|vat|реєстраційн\w*|регистрацион\w*|промо\w*)\s*$",
     re.I,
 )
 _MON = (
@@ -76,7 +76,9 @@ _LABEL = re.compile(
     r"parcel|serial|model|zip|postal|postcode|post\s+code|number|num|id|"
     r"(?:promo|promotional|discount|coupon|voucher|gift)(?:\s+code)?|"
     r"індекс\w*|индекс\w*|заказ\w*|замовлення|номер|інвойс\w*|рахунок|трек\w*|посилк\w*|накладн\w*|"
-    r"квитанц\w*|чек|поштов\w*|телефон|тел|tel|phone|no\.?|№)"
+    r"квитанц\w*|чек|поштов\w*|телефон|тел|tel|phone|no\.?|№|"
+    r"реєстраці\w*(?:\s+(?:код|номер))?|регистраци\w*(?:\s+(?:код|номер))?|registration(?:\s+(?:code|number|no\.?))?|"
+    r"company(?:\s+(?:code|number|no\.?))?|vat(?:\s+(?:id|code|number))?|tax(?:\s+(?:id|code|number))?|єдрпоу|edrpou|іпн|ipn)"
     r"\s*[:#№.-]*\s*(?:is|—)?\s*$",
     re.I,
 )
@@ -111,7 +113,7 @@ def _mask(text):
 def _keywords(masked):
     out = []
     for m in _KW.finditer(masked):
-        if m.group(0).lower().startswith("code") and _KW_BAD_PREFIX.search(masked[max(0, m.start() - 14):m.start()]):
+        if m.group(0).lower().startswith(("code", "код")) and _KW_BAD_PREFIX.search(masked[max(0, m.start() - 14):m.start()]):
             continue
         out.append((m.start(), m.end()))
     return out
@@ -167,6 +169,8 @@ def _candidates(masked, kws):
             continue
         if len(flat) == 5 and re.search(r"\b[A-Z]{2}\s$", before):
             continue
+        if re.search(r",\s*$", before) and re.match(r"\s+[A-ZА-ЯІЇЄҐÄÖÜÕ][a-zа-яіїєґäöüõ]{2,}", masked[b:b + 30]):
+            continue  # postal code before a city name
         out.append((a, b, flat, False, False))
     for m in _WORD.finditer(masked):
         w = m.group(1)
@@ -324,11 +328,19 @@ def parse_email(raw):
     return {
         "subject": subject, "name": name, "addr": addr, "date": date,
         "mid": _header(msg, "Message-ID").strip(), "plain": ptext, "html": htext, "links": links,
+        "bulk": bool(msg["List-Unsubscribe"]) or _header(msg, "Precedence").strip().lower() in ("bulk", "list", "junk"),
     }
+
+
+def _bulk_noise(p):
+    """newsletter (List-Unsubscribe/Precedence: bulk) whose subject has no code/verify keyword -> never a code"""
+    return bool(p.get("bulk")) and not _KW.search(_ZW.sub("", p.get("subject") or ""))
 
 
 def analyze(p):
     """-> ('code', [codes]) | ('link', url) | (None, None). plain first, html as fallback."""
+    if _bulk_noise(p):
+        return None, None
     for text in (p["plain"], p["html"]):
         if not text:
             continue
@@ -347,6 +359,8 @@ def analyze(p):
 
 
 def looks_verification(p):
+    if _bulk_noise(p):
+        return False
     return any(_VERIF.search(_ZW.sub("", t or "")) for t in (p["subject"], p["plain"], p["html"]))
 
 

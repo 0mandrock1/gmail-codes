@@ -149,3 +149,27 @@ class Link(unittest.TestCase):
 
     def test_non_https(self):
         self.assertIsNone(g.extract_link("Confirm", "confirm", ["http://x.com/confirm"]))
+
+
+class BoltFooter(unittest.TestCase):
+    FOOT = ("Знижки на комбо-сети та розіграш промокоду на 5000 грн. "
+            "Bolt Operations OÜ вул. Vana-Lõuna 15, 10134 Таллінн, Естонія Реєстраційний код 14532901")
+
+    def test_registration_code_and_postal_not_codes(self):
+        self.assertEqual(g.extract_codes("До -30% на комбо-меню", self.FOOT), [])
+
+    def test_company_vat_not_codes(self):
+        self.assertEqual(g.extract_codes("", "Company code 12345678, VAT 987654321"), [])
+
+    def test_bulk_newsletter_ignored(self):
+        p = {"subject": "До -30% на комбо-меню", "plain": "Your verification code 123456", "html": "",
+             "links": [], "bulk": True}
+        self.assertEqual(g.analyze(p), (None, None))
+        self.assertFalse(g.looks_verification(p))
+
+    def test_bulk_with_code_subject_still_works(self):
+        p = {"subject": "123456 is your Acme code", "plain": "Hello", "html": "", "links": [], "bulk": True}
+        self.assertEqual(g.analyze(p), ("code", ["123456"]))
+
+    def test_real_code_next_to_address_style_comma(self):
+        self.assertEqual(g.extract_codes("", "Hi, 482913 is your verification code"), ["482913"])
