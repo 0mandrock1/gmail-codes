@@ -39,7 +39,7 @@ log = logging.getLogger("gmail-codes")
 # extraction
 # --------------------------------------------------------------------------
 _KW = re.compile(
-    r"(?<!\w)(?:codes?|verif\w*|otp|one[\s-]?time|passcode|security\s+code|pin|"
+    r"(?<!\w)(?:codes?|verif\w*|otp|one[\s-]?time|passcode|security\s+code|new\s+device|pin|"
     r"confirm\w*|authenticat\w*|log[\s-]?in|sign[\s-]?in|"
     r"код\w*|пароль|підтверд\w*|одноразов\w*|верифікац\w*|подтверд\w*)(?!\w)",
     re.I,
@@ -81,7 +81,16 @@ _LABEL = re.compile(
     re.I,
 )
 _ALNUM = re.compile(
-    r"(?<![\w.,#@/+$€£-])((?:[A-Z]{1,4}-)?[A-Z0-9]{4,10}|[A-Z0-9]{2,5}-[A-Z0-9]{2,5})(?![\w@])(?![.,]\d)"
+    r"(?<![\w.,#@/+$€£-])((?:[A-Za-z]{1,4}-)?[A-Za-z0-9]{4,10}|[A-Za-z0-9]{2,5}-[A-Za-z0-9]{2,5})(?![\w@])(?![.,]\d)"
+)
+_WORD = re.compile(r"(?<![\w.,#@/+$€£-])([A-Za-z]{5,10})(?![\w@])(?![.,]\d)")
+_ZW = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+_STOP = {"confirm", "verify", "verified", "continue", "button", "account", "login", "signin", "submit",
+         "resend", "cancel", "device", "support", "security", "password", "access", "minutes", "expire", "expires"}
+_VERIF = re.compile(
+    r"(?<!\w)(?:verif\w*|one[\s-]?time|otp|passcode|(?:confirmation|security|sign[\s-]?in|log[\s-]?in|auth\w*)\s+code|"
+    r"підтверд\w*|верифікац\w*|подтверд\w*|одноразов\w*)(?!\w)",
+    re.I,
 )
 _DIGITS = re.compile(
     r"(?<![\w.,#@/+$€£-])(?<!\d[ -])(\d{3}[ -]\d{3}|\d{4}[ -]\d{4}|\d{4,8})(?![\w@])(?![ -]\d)(?![.,]\d)"
@@ -90,7 +99,7 @@ _SENT = re.compile(r"[.!?](?:\s|$)")
 _LINK_KW = re.compile(r"verify|confirm|token|magic|login", re.I)
 _LINK_BAD = re.compile(r"unsubscribe|optout|opt-out", re.I)
 _URL = re.compile(r"https://[^\s<>\"')\]]+")
-WINDOW = 60
+WINDOW = 160
 
 
 def _mask(text):
@@ -108,14 +117,44 @@ def _keywords(masked):
     return out
 
 
-def _candidates(masked):
+def _own_block(masked, a, b):
+    i, j = a, b
+    while i > 0 and masked[i - 1] == " ":
+        i -= 1
+    while j < len(masked) and masked[j] == " ":
+        j += 1
+    return (i == 0 or masked[i - 1] in "|\n") and (j == len(masked) or masked[j] in "|\n")
+
+
+def _after_colon(masked, a, kws):
+    """token stands alone right after a keyword sentence ending with ':'"""
+    i = a
+    while i > 0 and masked[i - 1] in " |\n":
+        i -= 1
+    if i == 0 or masked[i - 1] not in ":：":
+        return False
+    c = i - 1
+    return any(ke <= c and c - ke <= WINDOW and not _SENT.search(masked[ke:c]) for _, ke in kws)
+
+
+def _transitions(flat):
+    return sum(1 for x, y in zip(flat, flat[1:]) if x.isdigit() != y.isdigit())
+
+
+def _candidates(masked, kws):
+    """-> [(start, end, code, own, after_only)]; own = standalone block after a ':' keyword sentence"""
     out = []
     for m in _ALNUM.finditer(masked):
         s = m.group(1)
         flat = s.replace("-", "")
-        if 5 <= len(flat) <= 10 and any(c.isdigit() for c in flat) and any(c.isalpha() for c in flat):
-            out.append((m.start(1), m.end(1), s))
-    taken = [(a, b) for a, b, _ in out]
+        if not (4 <= len(flat) <= 10 and any(c.isdigit() for c in flat) and any(c.isalpha() for c in flat)):
+            continue
+        own = _after_colon(masked, m.start(1), kws) and _own_block(masked, m.start(1), m.end(1))
+        lower = any(c.islower() for c in flat)
+        if lower and not own and _transitions(flat) < 2:
+            continue
+        out.append((m.start(1), m.end(1), s, own, lower and not own))
+    taken = [(a, b) for a, b, *_ in out]
     for m in _DIGITS.finditer(masked):
         a, b = m.start(1), m.end(1)
         if any(a < y and x < b for x, y in taken):
@@ -128,27 +167,38 @@ def _candidates(masked):
             continue
         if len(flat) == 5 and re.search(r"\b[A-Z]{2}\s$", before):
             continue
-        out.append((a, b, flat))
+        out.append((a, b, flat, False, False))
+    for m in _WORD.finditer(masked):
+        w = m.group(1)
+        if not (w.isupper() or w.islower()) or w.lower() in _STOP or _KW.fullmatch(w):
+            continue
+        if sum(c in "aeiouyAEIOUY" for c in w) / len(w) > 0.34:
+            continue
+        if _own_block(masked, m.start(1), m.end(1)) and _after_colon(masked, m.start(1), kws):
+            out.append((m.start(1), m.end(1), w, True, False))
     return [c for c in out if not _LABEL.search(masked[max(0, c[0] - 30):c[0]])]
 
 
 def _extract(text):
-    masked = _mask(text or "")
+    masked = _mask(_ZW.sub("", text or ""))
     kws = _keywords(masked)
     if not kws:
         return []
     best = {}
-    for s, e, norm in _candidates(masked):
+    for s, e, norm, own, after_only in _candidates(masked, kws):
+        key = (s, norm)
+        if own:
+            best[key] = -1
+            continue
         for ks, ke in kws:
             if s >= ke:
                 gap = masked[ke:s]
-            elif e <= ks:
+            elif e <= ks and not after_only:
                 gap = masked[e:ks]
             else:
                 continue
             if len(gap) > WINDOW or _SENT.search(gap):
                 continue
-            key = (s, norm)
             best[key] = min(best.get(key, 10 ** 9), len(gap))
     ranked = sorted(best.items(), key=lambda kv: (kv[1], kv[0][0]))
     codes = []
@@ -169,7 +219,7 @@ def extract_codes(subject, text):
 
 def extract_link(subject, text, links=()):
     """Verification link, only when keywords present. Caller ensures no code found."""
-    masked = _mask((subject or "") + "\n" + (text or ""))
+    masked = _mask(_ZW.sub("", (subject or "") + "\n" + (text or "")))
     if not _keywords(masked):
         return None
     for u in list(links) + _URL.findall(text or ""):
@@ -183,6 +233,7 @@ def extract_link(subject, text, links=()):
 # --------------------------------------------------------------------------
 class _Html(HTMLParser):
     BLOCK = {"br", "p", "div", "tr", "td", "th", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol"}
+    CELL = {"td", "th"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -192,7 +243,7 @@ class _Html(HTMLParser):
         if tag in ("script", "style", "head"):
             self._skip += 1
         if tag in self.BLOCK:
-            self.out.append("\n")
+            self.out.append(" | " if tag in self.CELL else "\n")
         if tag == "a":
             href = dict(attrs).get("href")
             if href:
@@ -202,7 +253,7 @@ class _Html(HTMLParser):
         if tag in ("script", "style", "head") and self._skip:
             self._skip -= 1
         if tag in self.BLOCK:
-            self.out.append("\n")
+            self.out.append(" | " if tag in self.CELL else "\n")
 
     def handle_data(self, data):
         if not self._skip:
@@ -216,7 +267,8 @@ def html_to_text(src):
         p.close()
     except Exception:
         pass
-    text = re.sub(r"[ \t\xa0]+", " ", "".join(p.out))
+    text = re.sub(r"[ \t\xa0]+", " ", _ZW.sub("", html.unescape("".join(p.out))))
+    text = re.sub(r"(?:\s*\|)+\s*\|", " |", text)
     return re.sub(r"\n\s*\n+", "\n", text).strip(), p.links
 
 
@@ -294,9 +346,15 @@ def analyze(p):
     return None, None
 
 
+def looks_verification(p):
+    return any(_VERIF.search(_ZW.sub("", t or "")) for t in (p["subject"], p["plain"], p["html"]))
+
+
 def format_message(p, kind, payload, spam, now):
     esc = lambda s: html.escape(s or "", quote=False)
-    if kind == "code":
+    if kind == "miss":
+        l1 = "⚠ код не розпізнано"
+    elif kind == "code":
         l1 = "🔑 " + " ".join("<code>%s</code>" % esc(c) for c in payload)
     else:
         l1 = '🔗 <a href="%s">посилання</a>' % html.escape(payload, quote=True)
@@ -503,6 +561,8 @@ class Mailbox:
         try:
             p = parse_email(raw)
             kind, payload = analyze(p)
+            if kind is None and looks_verification(p):
+                kind = "miss"
         except Exception as e:
             log.warning("parse_error uid=%d mailbox=%s type=%s", uid, self.name, type(e).__name__)
             p, kind, payload = None, None, None
@@ -517,6 +577,8 @@ class Mailbox:
                 fresh = [c for c, k in zip(payload, sc_keys) if not self.state.sc_recent(k, now)]
                 if fresh:
                     text = format_message(p, "code", fresh, self.spam, now)
+            elif kind == "miss":
+                text = format_message(p, "miss", None, self.spam, now)
             else:
                 text = format_message(p, "link", payload, self.spam, now)
         with self.state.tx():

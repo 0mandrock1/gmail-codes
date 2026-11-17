@@ -108,6 +108,32 @@ class Pipe(unittest.TestCase):
         self.assertEqual(st.mailbox("INBOX")[1], 1)
         self.assertEqual(st.db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0], 0)
 
+    def test_b2_unrecognized_verification_alerts(self):
+        st, n, mb = self.build()
+        im = FakeImap(uidnext=1)
+        self.baseline(mb, im)
+        im.msgs[1] = mail("<m1@x>", "Please verify your sign-in. Enter the secret shown in the app.",
+                          subj="Your confirmation code " + "x" * 100)
+        im.msgs[2] = mail("<m2@x>", "Weekly digest, nothing special", subj="Newsletter")
+        mb.poll(im)
+        self.assertEqual(len(self.tg.sent), 1)
+        t = self.tg.sent[0].split("\n")
+        self.assertEqual(t[0], "\u26a0 код не розпізнано")
+        self.assertIn("no-reply@svc.com", t[1])
+        self.assertLessEqual(len(t[2]), 80)
+        self.assertNotIn("secret", self.tg.sent[0])
+        self.assertEqual(st.mailbox("INBOX")[1], 2)
+        mb.handle(1, im.msgs[1])  # same Message-ID -> no repeat
+        self.assertEqual(len(self.tg.sent), 1)
+
+    def test_b3_plain_newsletter_silent(self):
+        st, n, mb = self.build()
+        im = FakeImap(uidnext=1)
+        self.baseline(mb, im)
+        im.msgs[1] = mail("<n1@x>", "Spring sale. Save big, shop now!", subj="Spring sale")
+        mb.poll(im)
+        self.assertEqual(self.tg.sent, [])
+
     def test_c_tg_down_outbox_then_delivery(self):
         st, n, mb = self.build()
         im = FakeImap(uidnext=1)

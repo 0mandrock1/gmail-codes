@@ -56,7 +56,29 @@ NEG = [
     "Підтвердіть замовлення №482913",
     "Verify your account. Call us today. We are at 123456 Long Street Avenue Number 5555555555",
     "Hello, nothing to see here 123456",
+    "Your code expires in minutes",
+    "Your verification code is valid for FIFTEEN MINUTES",
+    "Your code expires in 15min",
+    "Hi name1, please use this code later",
+    "Please verify your email address: Confirm",
+    "Use the following code to sign in: | Account: name1 | Device: Chrome 142.0.0.0 | Phoenix, AZ 85004 | Copyright \u00a9 2026 | since 2000",
 ]
+
+ZW = "\u200c"
+NAMECHEAP = (
+    "<html><head><style>.x{color:#a1b2c3}</style></head><body>"
+    "<div style='display:none'>" + (ZW + " ") * 80 + "</div>"
+    "<table><tr><td>Hi name1,</td></tr>"
+    "<tr><td>Someone is signing in. Please use the following code to enable your new device "
+    "\u2014 it will expire in 15 minutes:</td></tr>"
+    "<tr><td>" + ZW + "%s" + ZW + "</td></tr>"
+    "<tr><td>That wasn't me!</td></tr>"
+    "<tr><td>Account: name1</td></tr><tr><td>When: 2026-11-17 10:03:25 UT</td></tr>"
+    "<tr><td>Device: Mozilla 5.0 (Windows NT 10.0; Win64) Chrome 142.0.0.0</td></tr>"
+    "<tr><td>9 East Washington Street, Suite 400, Phoenix, AZ 85004</td></tr>"
+    "<tr><td>Copyright \u00a9 2026</td></tr><tr><td>Serving customers since 2000</td></tr>"
+    "</table></body></html>"
+)
 
 
 class Pos(unittest.TestCase):
@@ -90,6 +112,21 @@ class Pos(unittest.TestCase):
         self.assertEqual(p["subject"], "Код подтверждения 556677")
         self.assertEqual(p["name"], "Сервис")
         self.assertEqual(g.analyze(p), ("code", ["556677"]))
+
+
+class Namecheap(unittest.TestCase):
+    def test_regression(self):
+        t, _ = g.html_to_text(NAMECHEAP % ("k7" + ZW + "m2x9"))
+        self.assertEqual(g.extract_codes("Your confirmation code", t), ["k7m2x9"])
+
+    def test_zwnj_inside_code(self):
+        t, _ = g.html_to_text(NAMECHEAP % ("k7" + ZW + "m2" + ZW + "x9"))
+        self.assertEqual(g.extract_codes("Your confirmation code", t), ["k7m2x9"])
+        self.assertEqual(g.extract_codes("", "Your code: k7" + ZW + "m2x9"), ["k7m2x9"])
+
+    def test_no_sentence_break_noise(self):
+        t = "Use this code to sign in: | k7m2x9 | Account: name1 | When: 2026-11-17 10:03:25 UT | Chrome 142.0.0.0 | AZ 85004"
+        self.assertEqual(g.extract_codes("", t), ["k7m2x9"])
 
 
 class Neg(unittest.TestCase):
