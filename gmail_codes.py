@@ -94,6 +94,16 @@ _VERIF = re.compile(
     r"підтверд\w*|верифікац\w*|подтверд\w*|одноразов\w*)(?!\w)",
     re.I,
 )
+# A missing-code alert needs evidence of an actual verification request, not
+# incidental words such as "login" or "passcode" in product announcements.
+_MISS_INTENT = re.compile(
+    r"(?<!\w)(?:verif\w*\s+(?:code|number)|(?:confirmation|security|sign[\s-]?in|log[\s-]?in|auth\w*|one[\s-]?time)\s+code|"
+    r"(?:your|the|this|a)\s+(?:verif\w*|one[\s-]?time|otp|passcode)\s+(?:code|password)|"
+    r"(?:please\s+)?verif\w*\s+(?:your|the|this)\s+(?:email|address|account|identity|sign[\s-]?in|log[\s-]?in)|"
+    r"(?:код\w*\s+(?:підтверд\w*|подтверд\w*|верифікац\w*)|одноразов\w*\s+пароль|"
+    r"підтверд\w*\s+(?:вхід|особу|адресу)|подтверд\w*\s+(?:вход|личность|адрес)))\b",
+    re.I,
+)
 _DIGITS = re.compile(
     r"(?<![\w.,#@/+$€£-])(?<!\d[ -])(\d{3}[ -]\d{3}|\d{4}[ -]\d{4}|\d{4,8})(?![\w@])(?![ -]\d)(?![.,]\d)"
 )
@@ -361,7 +371,7 @@ def analyze(p):
 def looks_verification(p):
     if _bulk_noise(p):
         return False
-    return any(_VERIF.search(_ZW.sub("", t or "")) for t in (p["subject"], p["plain"], p["html"]))
+    return any(_MISS_INTENT.search(_ZW.sub("", t or "")) for t in (p["subject"], p["plain"], p["html"]))
 
 
 def format_message(p, kind, payload, spam, now):

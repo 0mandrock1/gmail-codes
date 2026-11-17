@@ -126,6 +126,26 @@ class Pipe(unittest.TestCase):
         mb.handle(1, im.msgs[1])  # same Message-ID -> no repeat
         self.assertEqual(len(self.tg.sent), 1)
 
+    def test_passkey_upgrade_is_not_missing_code(self):
+        raw = mail("<passkey@longbridgeapp.com>",
+                   "Longbridge has launched Passkey login. Set up your passkey for a smooth "
+                   "login experience. You can log in using your screen lock passcode, "
+                   "with no password required. Account & Security > Passkey Login.",
+                   subj="Longbridge Upgrade: Activate Your Passkey",
+                   frm="Longbridge <noreply@longbridgeapp.com>")
+        p = g.parse_email(raw)
+        self.assertEqual(g.analyze(p), (None, None))
+        self.assertFalse(g.looks_verification(p))
+        st, n, mb = self.build()
+        mb.handle(1, raw)
+        self.assertEqual(self.tg.sent, [])
+
+    def test_body_only_actual_verification_request_alerts(self):
+        p = g.parse_email(mail("<body-verification@x>",
+                              "Please verify your sign-in. Enter the secret shown in the app.",
+                              subj="Account activity"))
+        self.assertTrue(g.looks_verification(p))
+
     def test_b3_plain_newsletter_silent(self):
         st, n, mb = self.build()
         im = FakeImap(uidnext=1)
