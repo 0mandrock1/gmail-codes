@@ -28,3 +28,7 @@ Needs: IMAP enabled in Gmail, 2-Step Verification + an App Password, a Telegram 
 - Watches `INBOX` and `[Gmail]/Spam` by default; override with `MAILBOXES` (localized Gmail names differ).
 
 MIT licensed.
+
+## Telegram interface
+
+This is a **send-only verification-code notifier**. It deliberately has no persistent reply keyboard or interactive command menu: user interaction cannot safely improve IMAP delivery. After Gmail credential changes, check the IMAP authentication health, heartbeat and watchdog independently.
