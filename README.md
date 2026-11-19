@@ -32,3 +32,7 @@ MIT licensed.
 ## Telegram interface
 
 This is a **send-only verification-code notifier**. It deliberately has no persistent reply keyboard or interactive command menu: user interaction cannot safely improve IMAP delivery. After Gmail credential changes, check the IMAP authentication health, heartbeat and watchdog independently.
+
+## /help
+
+`/help`/`/start` are provided through the independent private `tg-help-listener` service (separate Telegram polling with per-bot offset), **not the IMAP worker**. Gmail delivery and credential handling are unchanged.
